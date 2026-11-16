@@ -155,7 +155,12 @@ RC MvccTrxLogReplayer::replay(const LogEntry &entry)
   auto trx_iter = trx_map_.find(header->trx_id);
   if (trx_iter == trx_map_.end()) {
     trx = static_cast<MvccTrx *>(trx_kit_.create_trx(log_handler_, header->trx_id));
-    // trx = new MvccTrx(trx_kit_, log_handler_, header->trx_id);
+    if (trx == nullptr) {
+      return RC::NOMEM;
+    }
+    // Track the recovered transaction so COMMIT/ROLLBACK releases the same
+    // instance instead of leaving a completed transaction in the active kit.
+    trx_map_.emplace(header->trx_id, trx);
   } else {
     trx = trx_iter->second;
   }
@@ -180,7 +185,7 @@ RC MvccTrxLogReplayer::on_done()
   for (auto &pair : trx_map_) {
     MvccTrx *trx = pair.second;
     trx->rollback(); // 恢复时的rollback，可能遇到之前已经回滚一半的事务又再次调用回滚的情况
-    delete pair.second;
+    trx_kit_.destroy_trx(pair.second);
   }
   trx_map_.clear();
 

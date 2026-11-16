@@ -144,9 +144,19 @@ def main():
                 server.ok('insert into drop_me values(456);')
                 server.rows('select * from drop_me where id=456;', [(456,)])
                 server.ok('drop table drop_me;')
+                # Leave a committed read after the checkpoint to exercise
+                # recovered-transaction cleanup on the next restart.
+                server.rows('select * from drop_me_backup;', [(99,)])
             with Server(binary, directory, trx) as server:
                 server.fails('desc drop_me;')
                 server.rows('select * from drop_me_backup;', [(99,)])
+                server.ok('drop table drop_me_backup;')
+            with Server(binary, directory, trx) as server:
+                server.rows('show tables;', [])
+                server.ok('create table after_drop(id int);')
+                server.ok('insert into after_drop values(7);')
+                server.rows('select * from after_drop;', [(7,)])
+                server.ok('drop table after_drop;')
             print(f'PASS: {trx}: DROP TABLE/resource cleanup/recreate/transactions/recovery', flush=True)
 
 
