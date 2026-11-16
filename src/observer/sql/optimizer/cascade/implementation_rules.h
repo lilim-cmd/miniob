@@ -126,3 +126,11 @@ public:
 //                          std::vector<std::unique_ptr<OperatorNode>> *transformed,
 //                          OptimizerContext *context) const override;
 // };
+
+class LogicalUpdateToUpdate : public Rule
+{
+public:
+  LogicalUpdateToUpdate();
+  void transform(OperatorNode *input, std::vector<std::unique_ptr<OperatorNode>> *transformed,
+      OptimizerContext *context) const override;
+};

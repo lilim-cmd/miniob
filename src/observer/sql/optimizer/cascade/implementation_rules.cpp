@@ -22,6 +22,8 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/calc_physical_operator.h"
 #include "sql/operator/delete_logical_operator.h"
 #include "sql/operator/delete_physical_operator.h"
+#include "sql/operator/update_logical_operator.h"
+#include "sql/operator/update_physical_operator.h"
 #include "sql/operator/predicate_logical_operator.h"
 #include "sql/operator/predicate_physical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
@@ -262,3 +264,22 @@ void LogicalPredicateToPredicate::transform(OperatorNode* input,
 
 //   transformed->emplace_back(std::move(groupby_phys_oper));
 // }
+
+LogicalUpdateToUpdate::LogicalUpdateToUpdate()
+{
+  type_ = RuleType::UPDATE_TO_PHYSICAL;
+  match_pattern_ = unique_ptr<Pattern>(new Pattern(OpType::LOGICALUPDATE));
+  match_pattern_->add_child(new Pattern(OpType::LEAF));
+}
+
+void LogicalUpdateToUpdate::transform(OperatorNode *input,
+    std::vector<std::unique_ptr<OperatorNode>> *transformed, OptimizerContext *context) const
+{
+  auto *logical = dynamic_cast<UpdateLogicalOperator *>(input);
+  auto physical = unique_ptr<PhysicalOperator>(
+      new UpdatePhysicalOperator(logical->table(), logical->field(), logical->value()));
+  for (auto &child : logical->children()) {
+    physical->add_general_child(child.get());
+  }
+  transformed->emplace_back(std::move(physical));
+}

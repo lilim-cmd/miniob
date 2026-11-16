@@ -43,3 +43,21 @@ RC VacuousTrx::commit() { return RC::SUCCESS; }
 RC VacuousTrx::rollback() { return RC::SUCCESS; }
 
 RC VacuousTrx::redo(Db *, const LogEntry &) { return RC::SUCCESS; }
+
+RC VacuousTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // Insert first so a failed insertion leaves the original row intact.
+  // Table insert/delete maintain all indexes, including unchanged keys.
+  RC rc = table->insert_record(new_record);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  rc = table->delete_record(old_record);
+  if (rc != RC::SUCCESS) {
+    RC undo_rc = table->delete_record(new_record);
+    if (undo_rc != RC::SUCCESS) {
+      LOG_ERROR("failed to undo replacement row: %s", strrc(undo_rc));
+    }
+  }
+  return rc;
+}

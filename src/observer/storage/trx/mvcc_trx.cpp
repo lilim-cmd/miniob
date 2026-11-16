@@ -344,10 +344,10 @@ RC MvccTrx::rollback()
         Table *table = operation.table();
         // 这里也可以不删除，仅仅给数据加个标识位，等垃圾回收器来收割也行
         Record record;
-        record.set_rid(rid);
+        // Index removal requires the replacement row's keys as well as its RID.
+        rc = table->get_record(rid, record);
         if (recovering_) {
           // 恢复的时候，需要额外判断下当前记录是否还是当前事务拥有。是的话才能删除记录
-          rc = table->get_record(rid, record);
           if (OB_SUCC(rc)) {
             Field begin_xid_field, end_xid_field;
             trx_fields(table, begin_xid_field, end_xid_field);
@@ -361,6 +361,9 @@ RC MvccTrx::rollback()
                      table->name(), rid.to_string().c_str(), strrc(rc));
             return rc;
           }
+        }
+        if (rc != RC::SUCCESS) {
+          return rc;
         }
         rc = table->delete_record(record);
         ASSERT(rc == RC::SUCCESS, "failed to delete record while rollback. rid=%s, rc=%s",
@@ -467,4 +470,14 @@ RC MvccTrx::redo(Db *db, const LogEntry &log_entry)
   }
 
   return RC::SUCCESS;
+}
+
+RC MvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
+{
+  // Reuse MVCC versioning and its existing commit/rollback log records.
+  RC rc = delete_record(table, old_record);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+  return insert_record(table, new_record);
 }
