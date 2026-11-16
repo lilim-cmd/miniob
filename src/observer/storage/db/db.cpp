@@ -263,6 +263,9 @@ RC Db::sync()
   auto dblwr_buffer = static_cast<DiskDoubleWriteBuffer *>(buffer_pool_manager_->get_dblwr_buffer());
   rc                = dblwr_buffer->flush_page();
   LOG_INFO("double write buffer flush pages ret=%s", strrc(rc));
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
 
   /*
   在sync期间，不允许有未完成的事务，也不允许开启新的事物。
@@ -275,7 +278,9 @@ RC Db::sync()
     return rc;
   }
 
-  check_point_lsn_ = current_lsn;
+  // Recovery starts inclusively at this LSN. All entries through current_lsn
+  // are already durable, and may refer to files removed by DROP TABLE.
+  check_point_lsn_ = current_lsn + 1;
   rc               = flush_meta();
   if (OB_FAIL(rc)) {
     LOG_ERROR("Failed to flush meta. db=%s, rc=%d:%s", name_.c_str(), rc, strrc(rc));
@@ -349,7 +354,14 @@ RC Db::init_meta()
     }
 
     buffer[n]        = '\0';
-    check_point_lsn_ = atoll(buffer);  // 当前元数据就这一个数字
+    // Old metadata contains only an LSN. The optional second number preserves
+    // MVCC visibility when the checkpoint skips all historical transactions.
+    stringstream metadata(buffer);
+    metadata >> check_point_lsn_;
+    int32_t trx_id = 0;
+    if (metadata >> trx_id) {
+      trx_kit_->recover_trx_id(trx_id);
+    }
     LOG_INFO("Successfully read db meta file. db=%s, file=%s, check_point_lsn=%ld", 
              name_.c_str(), db_meta_file_path.c_str(), check_point_lsn_);
   }
@@ -376,7 +388,7 @@ RC Db::flush_meta()
     return RC::IOERR_WRITE;
   }
 
-  string buffer = to_string(check_point_lsn_);
+  string buffer = to_string(check_point_lsn_) + " " + to_string(trx_kit_->current_trx_id());
   int    n      = write(fd, buffer.c_str(), buffer.size());
   if (n < 0) {
     LOG_ERROR("Failed to write db meta file. db=%s, file=%s, errno=%s", 
@@ -400,6 +412,9 @@ RC Db::flush_meta()
     }
   }
 
+  if (close(fd) < 0 && OB_SUCC(rc)) {
+    rc = RC::IOERR_CLOSE;
+  }
   return rc;
 }
 

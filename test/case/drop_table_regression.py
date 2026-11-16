@@ -4,6 +4,8 @@ import argparse
 import logging
 from pathlib import Path
 import tempfile
+import shutil
+from contextlib import contextmanager
 
 from update_regression import Server
 from miniob_test import TestSuite, EvalResult
@@ -108,6 +110,19 @@ def exercise(server):
     assert not list(directory.glob('drop_me-*.index'))
 
 
+@contextmanager
+def preserved_directory(trx):
+    with tempfile.TemporaryDirectory(prefix=f'miniob-drop-{trx}-') as directory:
+        try:
+            yield directory
+        except BaseException:
+            destination = Path.cwd() / 'drop-table-failure' / trx
+            shutil.copytree(directory, destination, dirs_exist_ok=True)
+            for log in Path(directory).glob('observer.log*'):
+                print(log.read_text(errors='replace')[-30000:], flush=True)
+            raise
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('observer', type=Path)
@@ -116,7 +131,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     run_basic(binary)
     for trx in ('vacuous', 'mvcc'):
-        with tempfile.TemporaryDirectory(prefix=f'miniob-drop-{trx}-') as directory:
+        with preserved_directory(trx) as directory:
             with Server(binary, directory, trx) as server:
                 exercise(server)
             # Recovery must not resurrect deleted tables or require their files.

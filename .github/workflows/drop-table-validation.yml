@@ -5,6 +5,10 @@ on:
     branches: ['feat/drop-table']
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: read
 
@@ -32,10 +36,21 @@ jobs:
           git -C deps/3rd/libevent fetch --depth 1 origin 112421c8fa4840acd73502f2ab6a674fc025de37
           git -C deps/3rd/jsoncpp fetch --depth 1 origin tag 1.9.6
           bash build.sh init
+      - name: Restore compiled objects
+        uses: actions/cache/restore@v4
+        with:
+          path: build
+          key: miniob-drop-table-objects-${{ github.sha }}
+          restore-keys: miniob-drop-table-objects-
       - name: Compile observer
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DWITH_UNIT_TESTS=OFF -DWITH_CPPLINGS=OFF
           cmake --build build --target observer -j2 2>&1 | tee build.log
+      - name: Save compiled objects
+        uses: actions/cache/save@v4
+        with:
+          path: build
+          key: miniob-drop-table-objects-${{ github.sha }}
       - name: Run basic and DROP TABLE regressions
         run: python3 -u test/case/drop_table_regression.py build/bin/observer 2>&1 | tee drop-table-validation.log
       - name: Run UPDATE regression
@@ -49,4 +64,5 @@ jobs:
             build.log
             drop-table-validation.log
             update-validation.log
+            drop-table-failure/
           retention-days: 7

@@ -481,3 +481,10 @@ RC MvccTrx::update_record(Table *table, Record &old_record, Record &new_record)
   }
   return insert_record(table, new_record);
 }
+
+
+void MvccTrxKit::recover_trx_id(int32_t trx_id)
+{
+  int32_t current = current_trx_id_.load();
+  while (current < trx_id && !current_trx_id_.compare_exchange_weak(current, trx_id)) {}
+}

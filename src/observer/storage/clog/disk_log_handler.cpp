@@ -75,7 +75,9 @@ RC DiskLogHandler::await_termination()
 
 RC DiskLogHandler::replay(LogReplayer &replayer, LSN start_lsn)
 {
-  LSN max_lsn = 0;
+  // A checkpoint can start beyond the last entry. Do not reset allocation
+  // to zero merely because no newer log entries need replaying.
+  LSN max_lsn = start_lsn > 0 ? start_lsn - 1 : 0;
   auto replay_callback = [&replayer, &max_lsn](LogEntry &entry) -> RC {
     if (entry.lsn() > max_lsn) {
       max_lsn = entry.lsn();

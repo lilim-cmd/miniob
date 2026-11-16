@@ -41,6 +41,8 @@ public:
 
 public:
   int32_t next_trx_id();
+  int32_t current_trx_id() const override { return current_trx_id_.load(); }
+  void recover_trx_id(int32_t trx_id) override;
 
 public:
   int32_t max_trx_id() const;

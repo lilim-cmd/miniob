@@ -114,6 +114,11 @@ public:
   TrxKit()          = default;
   virtual ~TrxKit() = default;
 
+  // Persist transaction ID allocation across checkpoints, even when no old
+  // transaction log records need replaying. Stateless kits use the defaults.
+  virtual int32_t current_trx_id() const { return 0; }
+  virtual void recover_trx_id(int32_t) {}
+
   virtual RC                       init()             = 0;
   virtual const vector<FieldMeta> *trx_fields() const = 0;
 
