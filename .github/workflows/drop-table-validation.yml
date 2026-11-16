@@ -1,0 +1,52 @@
+name: drop-table validation
+
+on:
+  push:
+    branches: ['feat/drop-table']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ASAN_OPTIONS: detect_leaks=0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake flex bison
+      - name: Cache dependencies
+        id: deps
+        uses: actions/cache@v4
+        with:
+          path: deps/3rd/usr/local
+          key: miniob-drop-table-deps-v1-ubuntu24
+      - name: Build dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          git -C deps/3rd/libevent fetch --depth 1 origin 112421c8fa4840acd73502f2ab6a674fc025de37
+          git -C deps/3rd/jsoncpp fetch --depth 1 origin tag 1.9.6
+          bash build.sh init
+      - name: Compile observer
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON -DWITH_UNIT_TESTS=OFF -DWITH_CPPLINGS=OFF
+          cmake --build build --target observer -j2 2>&1 | tee build.log
+      - name: Run basic and DROP TABLE regressions
+        run: python3 -u test/case/drop_table_regression.py build/bin/observer 2>&1 | tee drop-table-validation.log
+      - name: Run UPDATE regression
+        run: python3 -u test/case/update_regression.py build/bin/observer 2>&1 | tee update-validation.log
+      - name: Save verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drop-table-validation-logs
+          path: |
+            build.log
+            drop-table-validation.log
+            update-validation.log
+          retention-days: 7

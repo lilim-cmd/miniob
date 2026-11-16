@@ -13,6 +13,9 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "storage/db/db.h"
+#include "catalog/catalog.h"
+#include "common/lang/filesystem.h"
+#include <system_error>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -415,3 +418,65 @@ RC Db::init_dblwr_buffer()
 LogHandler        &Db::log_handler() { return *log_handler_; }
 BufferPoolManager &Db::buffer_pool_manager() { return *buffer_pool_manager_; }
 TrxKit            &Db::trx_kit() { return *trx_kit_; }
+
+
+RC Db::drop_table(const char *table_name)
+{
+  if (common::is_blank(table_name)) {
+    return RC::INVALID_ARGUMENT;
+  }
+  auto iter = opened_tables_.find(table_name);
+  if (iter == opened_tables_.end()) {
+    return RC::SCHEMA_TABLE_NOT_EXIST;
+  }
+  Table *table = iter->second;
+  // LSM tables share a key space and need a separate key-range deletion path.
+  if (table->table_meta().storage_engine() != StorageEngine::HEAP) {
+    return RC::UNSUPPORTED;
+  }
+  vector<Trx *> trxes;
+  trx_kit_->all_trxes(trxes);
+  for (Trx *trx : trxes) {
+    if (trx->id() > 0) {
+      return RC::UNSUPPORTED;
+    }
+  }
+
+  // A checkpoint must cover old WAL entries before their table/files vanish;
+  // otherwise recovery would attempt to replay records for the dropped table.
+  RC rc = sync();
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+
+  const string name = table->name();
+  const int32_t table_id = table->table_id();
+  vector<string> files;
+  const TableMeta &meta = table->table_meta();
+  for (int i = 0; i < meta.index_num(); ++i) {
+    files.emplace_back(table_index_file(path_.c_str(), name.c_str(), meta.index(i)->name()));
+  }
+  files.emplace_back(table_data_file(path_.c_str(), name.c_str()));
+  files.emplace_back(table_lob_file(path_.c_str(), name.c_str()));
+  files.emplace_back(table_meta_file(path_.c_str(), name.c_str()) + ".tmp");
+  files.emplace_back(table_meta_file(path_.c_str(), name.c_str()));
+
+  // Destroying the table releases the record handler, in-memory indexes and
+  // their buffer pools. Close all file handles before unlinking their files.
+  opened_tables_.erase(iter);
+  Catalog::get_instance().remove_table_stats(table_id);
+  delete table;
+
+  RC result = RC::SUCCESS;
+  for (const string &file : files) {
+    std::error_code error;
+    filesystem::remove(file, error);
+    // Optional LOB/temp files need not exist. Real removal errors must be
+    // reported, but continue cleaning the remaining resources.
+    if (error) {
+      LOG_ERROR("failed to remove dropped table file. file=%s, error=%s", file.c_str(), error.message().c_str());
+      result = RC::FILE_REMOVE;
+    }
+  }
+  return result;
+}

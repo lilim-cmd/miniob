@@ -49,6 +49,9 @@ public:
    */
   void update_table_stats(int table_id, const TableStats &table_stats);
 
+  /// Forget cached statistics when the owning table is dropped.
+  void remove_table_stats(int table_id);
+
   /**
    * @brief Gets the singleton instance of the Catalog.
    *
